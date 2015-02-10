@@ -11,7 +11,7 @@ using namespace cat;
 
 static Clock m_clock;
 
-static const int GF_BITS = 5;
+static const int GF_BITS = 6;
 static const int GF_SIZE = 1 << GF_BITS;
 
 static u8 GEN_POLY[GF_SIZE];

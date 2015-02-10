@@ -1,4 +1,4 @@
-#include "libcat/Platform.hpp"
+#include "Platform.hpp"
 using namespace cat;
 
 
@@ -104,7 +104,7 @@ static void GFC256Init()
     for (int y = 1; y < 256; ++y)
     {
         // Calculate log(y) for mult and 255 - log(y) for div
-        const u8 log_y = GFC256_LOG_TABLE[y];
+        const u8 log_y = (u8)GFC256_LOG_TABLE[y];
         const u8 log_yn = 255 - log_y;
 
         // Next subtable
@@ -239,6 +239,122 @@ void generate_cauchy(u8* matrix, int width)
 #include <vector>
 using namespace std;
 
+class Decoder
+{
+    struct Data
+    {
+        int group;
+        int id;
+        int t;
+    };
+
+    vector<Data> DataHistory;
+
+    struct Dupe
+    {
+        vector<int> unknowns;
+        int id;
+        int t;
+    };
+
+    vector<Dupe> DupeHistory;
+
+    void ExpireHistory(int t_oldest)
+    {
+        bool modded;
+        do
+        {
+            modded = false;
+            for (int i = 0; i < (int)DataHistory.size(); ++i)
+            {
+                if (DataHistory[i].t < t_oldest)
+                {
+                    DataHistory.erase(DataHistory.begin() + i);
+                    modded = true;
+                    break;
+                }
+            }
+            for (int i = 0; i < (int)DupeHistory.size(); ++i)
+            {
+                if (DupeHistory[i].t < t_oldest)
+                {
+                    DupeHistory.erase(DupeHistory.begin() + i);
+                    modded = true;
+                    break;
+                }
+            }
+        } while (modded);
+    }
+
+    void eliminateUnknown(int sym_id)
+    {
+        for (int i = 0; i < (int)DupeHistory.size(); ++i)
+        {
+            Dupe& dupe = DupeHistory[i];
+
+            for (int j = 0; j < (int)dupe.unknowns.size(); ++j)
+            {
+            }
+        }
+    }
+
+    int latest_sym_id, current_group;
+
+    void updateLastestSymId(int sym_id)
+    {
+        // Assumes no re-ordering
+
+        if (latest_sym_id < sym_id)
+        {
+            // group increments when symbol id rolls over
+            current_group++;
+        }
+
+        latest_sym_id = sym_id;
+    }
+
+public:
+    Decoder()
+    {
+        current_group = 0;
+        latest_sym_id = 0;
+    }
+    ~Decoder()
+    {
+    }
+
+    void OnData(int sym_id, int t_sent)
+    {
+        updateLastestSymId(sym_id);
+
+        Data d;
+        d.group = current_group;
+        d.id = sym_id;
+        d.t = t_sent;
+
+        history.push_back(d);
+    }
+
+    void OnErasure(int start_sym_id, int stop_sym_id, int dupe_id, int t_sent)
+    {
+    }
+
+    void PrintMatrix()
+    {
+        int rows = 0, cols = 0;
+
+        vector<int> cols;
+
+        for (int i = 0; i < (int)DupeHistory.size(); ++i)
+        {
+            Dupe& dupe = DupeHistory[i];
+
+            dupe.unknowns
+        }
+    }
+};
+
+
 struct Symbol
 {
     int id;
@@ -259,10 +375,12 @@ void traffic_sim()
 {
     int history_ms = 250;
     int send_ms = 20;
-    int pkt_max = 2;
-    int dupe_ms = 100;
-    int max_sym_id = 26;
-    int max_dupe_id = 6;
+    int pkt_max = 20;
+    int dupe_ms = 20;
+    int max_sym_id = 100;
+    int max_dupe_id = 28;
+
+    Decoder decoder;
 
     srand(0);
 
@@ -286,7 +404,14 @@ void traffic_sim()
             bool lost = (rand() % 100) < loss_prob;
             if (lost)
             {
-                loss_prob = 50;
+                if (loss_prob < 50)
+                {
+                    loss_prob = 50;
+                }
+                else
+                {
+                    loss_prob = 3;
+                }
             }
             else
             {
@@ -298,13 +423,31 @@ void traffic_sim()
             s.t = t;
             s.lost = lost;
 
+            // Erase any duplicate sym_ids from history
+            bool modded;
+            do
+            {
+                modded = false;
+                for (int i = 0; i < (int)history.size(); ++i)
+                {
+                    if (history[i].id == sym_id)
+                    {
+                        history.erase(history.begin() + i);
+                        modded = true;
+                        break;
+                    }
+                }
+            } while (modded);
+
+            decoder.OnData(sym_id, t);
+
+            history.push_back(s);
+
             sym_id++;
             if (sym_id >= max_sym_id)
             {
                 sym_id = 0;
             }
-
-            history.push_back(s);
         }
 
         // If simulation time indicates another dupe should be sent,
@@ -328,53 +471,65 @@ void traffic_sim()
 
             if (history.size() > 0)
             {
-                bool lost = (rand() % 100) < loss_prob;
-                if (lost)
+                //for (int dupe_i = 0; dupe_i < 2; ++dupe_i)
                 {
-                    loss_prob = 50;
-                }
-                else
-                {
-                    loss_prob = 3;
-                }
-
-                last_dupe_ms = t;
-
-                Dupe d;
-                d.dupe_id = dupe_id;
-                d.t = t;
-                for (int i = 0; i < (int)history.size(); ++i)
-                {
-                    if (history[i].lost)
+                    bool lost = (rand() % 100) < loss_prob;
+                    if (lost)
                     {
-                        d.lost_syms.push_back(history[i].id);
-                    }
-                }
-                d.start_sym_id = history[0].id;
-                d.stop_sym_id = history[history.size() - 1].id;
-                d.lost = lost;
-                dupes.push_back(d);
-
-                dupe_id++;
-                if (dupe_id >= max_dupe_id)
-                {
-                    dupe_id = 0;
-                }
-
-                for (int i = 0; i < (int)dupes.size(); ++i)
-                {
-                    if (dupes[i].lost_syms.size() > 0)
-                    {
-                        cout << dupes[i].dupe_id << " : ";
-                        for (int j = 0; j < (int)dupes[i].lost_syms.size(); ++j)
+                        if (loss_prob < 50)
                         {
-                            cout << dupes[i].lost_syms[j] << " ";
+                            loss_prob = 50;
                         }
-                        cout << endl;
+                        else
+                        {
+                            loss_prob = 3;
+                        }
                     }
-                }
+                    else
+                    {
+                        loss_prob = 3;
+                    }
 
-                dupes.clear();
+                    last_dupe_ms = t;
+
+                    Dupe d;
+                    d.dupe_id = dupe_id;
+                    d.t = t;
+                    for (int i = 0; i < (int)history.size(); ++i)
+                    {
+                        if (history[i].lost)
+                        {
+                            d.lost_syms.push_back(history[i].id);
+                        }
+                    }
+                    d.start_sym_id = history[0].id;
+                    d.stop_sym_id = history[history.size() - 1].id;
+                    d.lost = lost;
+                    dupes.push_back(d);
+
+                    decoder.OnErasure(d.start_sym_id, d.stop_sym_id, dupe_id, t);
+
+                    dupe_id++;
+                    if (dupe_id >= max_dupe_id)
+                    {
+                        dupe_id = 0;
+                    }
+
+                    for (int i = 0; i < (int)dupes.size(); ++i)
+                    {
+                        if (dupes[i].lost_syms.size() > 0)
+                        {
+                            cout << dupes[i].dupe_id << " : ";
+                            for (int j = 0; j < (int)dupes[i].lost_syms.size(); ++j)
+                            {
+                                cout << dupes[i].lost_syms[j] << " ";
+                            }
+                            cout << endl;
+                        }
+                    }
+
+                    dupes.clear();
+                }
             }
         }
 
